@@ -1,3 +1,4 @@
+
 import streamlit as st
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
@@ -13,11 +14,38 @@ import os
 load_dotenv()
 
 # Set your Gemini API key
-api_key = os.getenv("GOOGLE_API_KEY")  # replace this with your actual Gemini API key
+api_key = os.getenv("GOOGLE_API_KEY")  # replace with your actual Gemini API key
 
-# Initialize session state for vectorstore
+# Initialize session state variables
 if 'vectorstore' not in st.session_state:
     st.session_state.vectorstore = None
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+if 'email' not in st.session_state:
+    st.session_state.email = ""
+
+# Login function allowing any Gmail email and any password
+def login():
+    st.sidebar.title("🔐 Login")
+    email = st.sidebar.text_input("Email")
+    password = st.sidebar.text_input("Password", type="password")
+    login_button = st.sidebar.button("Login")
+
+    if login_button:
+        if email.endswith("@gmail.com") and password:
+            st.session_state.logged_in = True
+            st.session_state.email = email
+            st.sidebar.success(f"Logged in as {email}")
+        else:
+            st.sidebar.error("❌ Please enter a valid Gmail address and password")
+
+# Logout button in sidebar
+def logout():
+    if st.sidebar.button("Logout"):
+        st.session_state.logged_in = False
+        st.session_state.email = ""
+        st.session_state.vectorstore = None
+        st.experimental_rerun()
 
 # Load PDF and create vector store
 def load_knowledge():
@@ -66,46 +94,54 @@ def get_qa_chain():
     )
     return qa
 
-# Streamlit UI setup
+# --- Main app ---
+
 st.set_page_config(page_title="MindMate - Mental Health Companion", layout="centered")
-st.title("🧠 MindMate - Your Mental Health Companion")
-st.markdown("Talk to me anytime — I'm here to listen, help, and guide.")
 
-# Load document button
-if st.button("📂 Load Mental Health Document"):
-    load_knowledge()
-
-# Chat interface
-if st.session_state.vectorstore:
-    user_input = st.text_input("Ask a question about mental health:", "")
-
-    if user_input:
-        qa_chain = get_qa_chain()
-        result = qa_chain.invoke({"query": user_input})
-
-        st.markdown(f"**You:** {user_input}")
-
-        # Check if the result is empty or not helpful
-        if "does not offer" in result['result'].lower() or "i'm sorry" in result['result'].lower():
-            st.info("ℹ️ The document didn't contain info on that. Here's a general response:")
-
-            fallback_llm = ChatGoogleGenerativeAI(
-                model="gemini-1.5-flash",
-                temperature=0.4,
-                max_tokens=1024,
-                google_api_key=api_key
-            )
-
-            fallback_response = fallback_llm.invoke(
-                f"{user_input} (Answer this in an empathetic and helpful way for someone dealing with mental health issues)"
-            )
-            st.markdown(f"**MindMate (General Advice):** {fallback_response.content}")
-        else:
-            st.markdown(f"**MindMate:** {result['result']}")
-
-            with st.expander("📚 Show sources"):
-                for i, doc in enumerate(result["source_documents"]):
-                    st.markdown(f"**Source {i+1}:**")
-                    st.write(doc.page_content[:400] + "...")
+if not st.session_state.logged_in:
+    login()
+    st.info("⚠️ Please log in to use MindMate.")
 else:
-    st.warning("⚠️ Please load the document first using the button above.")
+    logout()
+    st.title("🧠 MindMate - Your Mental Health Companion")
+    st.markdown("Talk to me anytime — I'm here to listen, help, and guide.")
+
+    # Load document button
+    if st.button("📂 Load Mental Health Document"):
+        load_knowledge()
+
+    # Chat interface
+    if st.session_state.vectorstore:
+        user_input = st.text_input("Ask a question about mental health:", "")
+
+        if user_input:
+            qa_chain = get_qa_chain()
+            result = qa_chain.invoke({"query": user_input})
+
+            st.markdown(f"**You:** {user_input}")
+
+            # Check if the result is empty or not helpful
+            if "does not offer" in result['result'].lower() or "i'm sorry" in result['result'].lower():
+                st.info("ℹ️ The document didn't contain info on that. Here's a general response:")
+
+                fallback_llm = ChatGoogleGenerativeAI(
+                    model="gemini-1.5-flash",
+                    temperature=0.4,
+                    max_tokens=1024,
+                    google_api_key=api_key
+                )
+
+                fallback_response = fallback_llm.invoke(
+                    f"{user_input} (Answer this in an empathetic and helpful way for someone dealing with mental health issues)"
+                )
+                st.markdown(f"**MindMate (General Advice):** {fallback_response.content}")
+            else:
+                st.markdown(f"**MindMate:** {result['result']}")
+
+                with st.expander("📚 Show sources"):
+                    for i, doc in enumerate(result["source_documents"]):
+                        st.markdown(f"**Source {i+1}:**")
+                        st.write(doc.page_content[:400] + "...")
+    else:
+        st.warning("⚠️ Please load the document first using the button above.")
+
