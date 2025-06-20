@@ -1,6 +1,6 @@
-streamlit
-langchai
-langchain-google-genai
-langchain-community
-faiss-cpu
-python-dotenv
+streamlit==1.35.0
+langchain==0.1.16
+langchain-google-genai==0.0.8
+langchain-community==0.0.35
+faiss-cpu==1.7.4
+python-dotenv==1.0.1
