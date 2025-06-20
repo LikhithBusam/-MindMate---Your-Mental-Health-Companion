@@ -1,4 +1,3 @@
-
 import streamlit as st
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
@@ -8,13 +7,14 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from dotenv import load_dotenv
+from langchain.schema import HumanMessage
 import os
 
 # Load environment variables
 load_dotenv()
 
 # Set your Gemini API key
-api_key = os.getenv("GOOGLE_API_KEY")  # replace with your actual Gemini API key
+api_key = os.getenv("GOOGLE_API_KEY")
 
 # Initialize session state variables
 if 'vectorstore' not in st.session_state:
@@ -23,6 +23,8 @@ if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'email' not in st.session_state:
     st.session_state.email = ""
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
 
 # Login function allowing any Gmail email and any password
 def login():
@@ -45,6 +47,7 @@ def logout():
         st.session_state.logged_in = False
         st.session_state.email = ""
         st.session_state.vectorstore = None
+        st.session_state.chat_history = []
         st.experimental_rerun()
 
 # Load PDF and create vector store
@@ -72,8 +75,9 @@ def get_qa_chain():
     )
 
     prompt_template = """
+    You are MindMate, a compassionate assistant helping users understand mental health topics.
     Use the following context from the mental health document to answer the question.
-    If you don't know the answer, say so clearly.
+    If no relevant info exists, respond with empathy and general guidance.
 
     Context: {context}
 
@@ -94,6 +98,27 @@ def get_qa_chain():
     )
     return qa
 
+# Fallback response when no knowledge found
+def fallback_response(user_input):
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-1.5-flash",
+        temperature=0.4,
+        max_tokens=1024,
+        google_api_key=api_key
+    )
+
+    prompt = f"""
+    A user asked: "{user_input}"
+    
+    Provide a supportive and empathetic response related to mental health.
+    Make sure to emphasize that this is not medical advice and suggest reaching out to professionals if needed.
+    Keep the tone warm and comforting.
+    """
+
+    message = HumanMessage(content=prompt)
+    result = llm.invoke([message])
+    return result.content
+
 # --- Main app ---
 
 st.set_page_config(page_title="MindMate - Mental Health Companion", layout="centered")
@@ -106,42 +131,53 @@ else:
     st.title("🧠 MindMate - Your Mental Health Companion")
     st.markdown("Talk to me anytime — I'm here to listen, help, and guide.")
 
+    st.markdown("""
+    📌 *Disclaimer*:  
+    I am an AI companion and cannot replace professional mental health care.  
+    If you're feeling overwhelmed or in crisis, please reach out to a mental health professional or call a helpline.
+    """)
+
     # Load document button
     if st.button("📂 Load Mental Health Document"):
         load_knowledge()
 
     # Chat interface
     if st.session_state.vectorstore:
-        user_input = st.text_input("Ask a question about mental health:", "")
+        user_input = st.text_input("💬 Ask a question about mental health:", "")
 
         if user_input:
-            qa_chain = get_qa_chain()
-            result = qa_chain.invoke({"query": user_input})
+            with st.spinner("🔍 Thinking..."):
+                try:
+                    qa_chain = get_qa_chain()
+                    result = qa_chain.invoke({"query": user_input})
 
-            st.markdown(f"**You:** {user_input}")
+                    answer = result['result']
+                    sources = result.get('source_documents', [])
 
-            # Check if the result is empty or not helpful
-            if "does not offer" in result['result'].lower() or "i'm sorry" in result['result'].lower():
-                st.info("ℹ️ The document didn't contain info on that. Here's a general response:")
+                    # Handle empty or unhelpful answers
+                    if "does not offer" in answer.lower() or "i'm sorry" in answer.lower():
+                        answer = fallback_response(user_input)
 
-                fallback_llm = ChatGoogleGenerativeAI(
-                    model="gemini-1.5-flash",
-                    temperature=0.4,
-                    max_tokens=1024,
-                    google_api_key=api_key
-                )
+                    # Save to chat history
+                    st.session_state.chat_history.append(("You", user_input))
+                    st.session_state.chat_history.append(("MindMate", answer))
 
-                fallback_response = fallback_llm.invoke(
-                    f"{user_input} (Answer this in an empathetic and helpful way for someone dealing with mental health issues)"
-                )
-                st.markdown(f"**MindMate (General Advice):** {fallback_response.content}")
-            else:
-                st.markdown(f"**MindMate:** {result['result']}")
+                    # Display chat
+                    for speaker, msg in st.session_state.chat_history:
+                        if speaker == "You":
+                            st.markdown(f"**🧑‍💻 You:** {msg}")
+                        else:
+                            st.markdown(f"**🧠 MindMate:** {msg}")
 
-                with st.expander("📚 Show sources"):
-                    for i, doc in enumerate(result["source_documents"]):
-                        st.markdown(f"**Source {i+1}:**")
-                        st.write(doc.page_content[:400] + "...")
+                    if sources:
+                        with st.expander("📚 Show sources"):
+                            for i, doc in enumerate(sources):
+                                st.markdown(f"**Source {i+1}:**")
+                                st.write(doc.page_content[:400] + "...")
+
+                except Exception as e:
+                    st.error("⚠️ Something went wrong. Please try again.")
+                    st.write(str(e))
     else:
         st.warning("⚠️ Please load the document first using the button above.")
 
